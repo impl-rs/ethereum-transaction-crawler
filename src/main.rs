@@ -4,28 +4,39 @@ pub mod mock;
 pub mod templates;
 use crate::crawler::{Crawler, Wallet};
 use crate::templates::{body, form};
+use anyhow::Result;
 use axum::{
     extract::{Query, State},
     routing::get,
     Router,
 };
 use ethers::prelude::providers::Http;
-use ethers::prelude::providers::{JsonRpcClient, Provider};
+use ethers::prelude::{
+    providers::{JsonRpcClient, Provider},
+    HttpRateLimitRetryPolicy, RetryClient,
+};
 use maud::{html, Markup};
 use std::env::var;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use tower::limit::ConcurrencyLimitLayer;
 
-fn get_provider() -> Provider<impl JsonRpcClient> {
+fn get_provider() -> Result<Provider<impl JsonRpcClient>> {
     let http_provider = var("HTTP_PROVIDER").expect("HTTP_PROVIDER not set");
-    Provider::<Http>::try_from(http_provider).expect("could not instantiate HTTP Provider")
+
+    Ok(Provider::new(RetryClient::new(
+        Http::from_str(&http_provider)?,
+        Box::new(HttpRateLimitRetryPolicy),
+        10,
+        500,
+    )))
 }
 
 #[tokio::main]
 async fn main() {
     // initialize provider
-    let provider = Arc::new(get_provider());
+    let provider = Arc::new(get_provider().unwrap());
     // restrict to one concurrent request at the time
     let middleware = tower::ServiceBuilder::new().layer(ConcurrencyLimitLayer::new(1));
 

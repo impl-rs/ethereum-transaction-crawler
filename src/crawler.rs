@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
 
-const BUFFER_SIZE: usize = 100;
+const BUFFER_SIZE: usize = 10;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Wallet {
