@@ -7,20 +7,33 @@ use axum::{
     routing::get,
     Router,
 };
-use ethers::prelude::providers::{Http, Provider};
-use tower::limit::ConcurrencyLimitLayer;
-
+#[cfg(not(test))]
+use ethers::prelude::providers::Http;
+#[cfg(test)]
+use ethers::prelude::providers::MockProvider;
+use ethers::prelude::providers::{JsonRpcClient, Provider};
 use maud::{html, Markup};
+#[cfg(not(test))]
 use std::env::var;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tower::limit::ConcurrencyLimitLayer;
+
+#[cfg(test)]
+fn get_provider() -> Provider<impl JsonRpcClient> {
+    Provider::new(MockProvider::new())
+}
+
+#[cfg(not(test))]
+fn get_provider() -> Provider<impl JsonRpcClient> {
+    let http_provider = var("HTTP_PROVIDER").expect("HTTP_PROVIDER not set");
+    Provider::<Http>::try_from(http_provider).expect("could not instantiate HTTP Provider")
+}
 
 #[tokio::main]
 async fn main() {
     // initialize provider
-    let http_provider = var("HTTP_PROVIDER").expect("HTTP_PROVIDER not set");
-    let provider =
-        Provider::<Http>::try_from(http_provider).expect("could not instantiate HTTP Provider");
-
+    let provider = Arc::new(get_provider());
     // Restrivct to one concurrent request at the time
     let middleware = tower::ServiceBuilder::new().layer(ConcurrencyLimitLayer::new(1));
 
@@ -38,13 +51,13 @@ async fn main() {
 }
 
 async fn root(
-    State(provider): State<Provider<Http>>,
+    State(provider): State<Arc<Provider<impl JsonRpcClient>>>,
     maybe_wallet: Option<Query<Wallet>>,
 ) -> Markup {
     let title = "Ethereum transaction crawler";
     if let Some(wallet) = maybe_wallet {
         let crawler = Crawler::new(provider, wallet.clone());
-        let maybe_transactions = crawler.get_transactions(None).await;
+        let maybe_transactions = crawler.get_transactions().await;
         body(
             title,
             html! {

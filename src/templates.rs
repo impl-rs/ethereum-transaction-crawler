@@ -20,8 +20,8 @@ pub fn form() -> Markup {
     html! {
         h1 { "Insert wallet address and block number to search" }
         form action="/" {
-            input type="text" name="address" placeholder="Wallet address" value="0x7F5748D2a70c29d897e9094Aa335114A596A777e";
-            input type="text" name="block" placeholder="Block number" value="17565043";
+            input type="text" name="address" placeholder="Wallet address" value="0x62c7c75b46E86FAdd27928D0F6de1df22276860e";
+            input type="text" name="block" placeholder="Block number" value="17571440";
             input type="submit" value="Submit";
         }
     }

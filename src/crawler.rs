@@ -4,7 +4,7 @@ use axum::extract::Query;
 use ethers::{
     abi::Address,
     prelude::{
-        providers::{Http, Middleware, Provider},
+        providers::{JsonRpcClient, Middleware, Provider},
         types::H256,
     },
     types::Transaction,
@@ -13,8 +13,7 @@ use ethers::{
 use futures::{stream, StreamExt};
 use serde::Deserialize;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
+use std::time::Instant;
 
 const BUFFER_SIZE: usize = 100;
 
@@ -24,14 +23,14 @@ pub struct Wallet {
     pub block: u64,
 }
 
-pub struct Crawler {
-    provider: Arc<Provider<Http>>,
+pub struct Crawler<T: JsonRpcClient> {
+    provider: Arc<Provider<T>>,
     wallet: Wallet,
 }
 
-async fn fetch_block(provider: Arc<Provider<Http>>, block_number: u64) -> Vec<H256> {
+async fn fetch_block(provider: Arc<Provider<impl JsonRpcClient>>, block_number: u64) -> Vec<H256> {
+    println!("Fetching block {}", block_number);
     let maybe_block = provider.get_block(block_number).await;
-    sleep(Duration::from_millis(1000)).await;
 
     match maybe_block {
         Ok(Some(block)) => block.transactions,
@@ -39,7 +38,7 @@ async fn fetch_block(provider: Arc<Provider<Http>>, block_number: u64) -> Vec<H2
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct AddressTransaction {
     pub from: Address,
     pub to: Option<Address>,
@@ -62,12 +61,12 @@ fn is_address_transaction(
 }
 
 async fn fetch_transaction(
-    provider: Arc<Provider<Http>>,
+    provider: Arc<Provider<impl JsonRpcClient>>,
     address: Address,
     tx: H256,
 ) -> Option<AddressTransaction> {
+    println!("Fetching transaction {}", tx);
     let maybe_transaction = provider.get_transaction(tx).await;
-    sleep(Duration::from_millis(1000)).await;
 
     match maybe_transaction {
         Ok(Some(transaction)) => is_address_transaction(address, transaction),
@@ -75,17 +74,11 @@ async fn fetch_transaction(
     }
 }
 
-impl Crawler {
-    pub fn new(provider: Provider<Http>, Query(wallet): Query<Wallet>) -> Self {
-        Self {
-            provider: Arc::new(provider),
-            wallet,
-        }
+impl<T: JsonRpcClient> Crawler<T> {
+    pub fn new(provider: Arc<Provider<T>>, Query(wallet): Query<Wallet>) -> Self {
+        Self { provider, wallet }
     }
-    pub async fn get_transactions(
-        self,
-        maybe_to_block: Option<u64>,
-    ) -> Result<Vec<AddressTransaction>> {
+    pub async fn get_transactions(self) -> Result<Vec<AddressTransaction>> {
         let Crawler {
             provider,
             wallet:
@@ -97,30 +90,180 @@ impl Crawler {
         } = self;
         let address = address.parse::<Address>()?;
 
-        // get latest block if no to_block is provided
-        let to_block = if let Some(to_block) = maybe_to_block {
-            to_block
-        } else {
-            provider.get_block_number().await?.as_u64()
-        };
+        let to_block = provider.get_block_number().await?.as_u64();
 
         // For benchmarking
         let now = Instant::now();
 
-        let address_transactions: Vec<AddressTransaction> =
-            stream::iter(from_block..to_block as u64)
-                .map(|block_number| fetch_block(provider.clone(), block_number))
-                .buffered(BUFFER_SIZE)
-                .flat_map(stream::iter)
-                .map(|tx| fetch_transaction(provider.clone(), address, tx))
-                .buffered(BUFFER_SIZE)
-                .filter_map(|tx| async { tx })
-                .collect()
-                .await;
+        let address_transactions: Vec<AddressTransaction> = stream::iter(from_block..=to_block)
+            .map(|block_number| fetch_block(provider.clone(), block_number))
+            .buffered(BUFFER_SIZE)
+            .flat_map(stream::iter)
+            .map(|tx| fetch_transaction(provider.clone(), address, tx))
+            .buffered(BUFFER_SIZE)
+            .filter_map(|tx| async { tx })
+            .collect()
+            .await;
 
         let elapsed = now.elapsed();
         println!("Elapsed: {:.2?}", elapsed);
 
         Ok(address_transactions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ethers::prelude::{
+        providers::MockProvider,
+        types::{Block, Transaction, H256, U64},
+    };
+
+    const ADDRESS: &str = "0xaa7a9ca87d3694b5755f213b5d04094b8d0f0a6f";
+    const ZERO_VALUE: &str = "0.000000000000000000";
+
+    fn setup(mock_provider: MockProvider) -> Arc<Provider<MockProvider>> {
+        Arc::new(Provider::new(mock_provider))
+    }
+
+    #[tokio::test]
+    async fn test_fetch_block() -> Result<()> {
+        let mock_provider = MockProvider::new();
+
+        let mut block: Block<H256> = Block::default();
+
+        block.transactions = vec![H256::zero()];
+        mock_provider.push(block)?;
+
+        let transactions = fetch_block(setup(mock_provider), 1).await;
+
+        assert_eq!(transactions.len(), 1);
+        assert_eq!(transactions[0], H256::zero());
+
+        Ok(())
+    }
+
+    async fn get_test_transaction(
+        address: Address,
+        tx: H256,
+        update_transaction: impl Fn(&mut Transaction) -> (),
+    ) -> Result<Option<AddressTransaction>> {
+        let mock_provider = MockProvider::new();
+
+        let mut transaction: Transaction = Transaction::default();
+
+        update_transaction(&mut transaction);
+
+        mock_provider.push(transaction)?;
+
+        let transaction = fetch_transaction(setup(mock_provider), address, tx).await;
+
+        Ok(transaction)
+    }
+
+    #[tokio::test]
+    async fn test_fetch_transaction() -> Result<()> {
+        let address = ADDRESS.parse::<Address>()?;
+        let tx = H256::zero();
+
+        // Should return None when address is not in from or to of transaction
+        let transaction = get_test_transaction(address, tx, |_| {}).await?;
+        assert_eq!(transaction, None);
+
+        // Should return Some when address is in from
+        let transaction = get_test_transaction(address, tx, |transaction| {
+            transaction.from = address;
+        })
+        .await?;
+        assert_eq!(
+            transaction,
+            Some(AddressTransaction {
+                from: address,
+                to: None,
+                value: ZERO_VALUE.into()
+            })
+        );
+
+        // Should return Some when address is in to
+        let transaction = get_test_transaction(address, tx, |transaction| {
+            transaction.to = Some(address);
+        })
+        .await?;
+        assert_eq!(
+            transaction,
+            Some(AddressTransaction {
+                from: Address::zero(),
+                to: Some(address),
+                value: ZERO_VALUE.into()
+            })
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_crawler() -> Result<()> {
+        let address = ADDRESS.parse::<Address>()?;
+
+        let mock_provider = MockProvider::new();
+
+        // push result for third transaction
+        let transaction: Transaction = Transaction::default();
+        mock_provider.push(Some(transaction))?;
+
+        // push result for second transaction
+        let mut transaction: Transaction = Transaction::default();
+        transaction.to = Some(address);
+        mock_provider.push(Some(transaction))?;
+
+        // push result for first transaction
+        let mut transaction: Transaction = Transaction::default();
+        transaction.from = address;
+        mock_provider.push(Some(transaction))?;
+
+        // push result for third block
+        let mut block: Block<H256> = Block::default();
+        block.transactions = vec![H256::zero()];
+        mock_provider.push(block)?;
+
+        // push result for second block
+        let mut block: Block<H256> = Block::default();
+        block.transactions = vec![H256::zero(), H256::zero()];
+        mock_provider.push(block)?;
+
+        // push result for first block
+        let block: Block<H256> = Block::default();
+        mock_provider.push(block)?;
+
+        // push result for get_block_number
+        mock_provider.push(U64::from(3))?;
+
+        let crawler = Crawler::new(
+            setup(mock_provider),
+            Query(Wallet {
+                address: ADDRESS.into(),
+                block: 1,
+            }),
+        );
+
+        let transactions = crawler.get_transactions().await?;
+        assert_eq!(
+            transactions,
+            [
+                AddressTransaction {
+                    from: address,
+                    to: None,
+                    value: ZERO_VALUE.into()
+                },
+                AddressTransaction {
+                    from: Address::zero(),
+                    to: Some(address,),
+                    value: ZERO_VALUE.into()
+                },
+            ]
+        );
+
+        Ok(())
     }
 }
