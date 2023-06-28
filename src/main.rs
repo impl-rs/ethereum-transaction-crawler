@@ -1,4 +1,6 @@
 pub mod crawler;
+#[cfg(test)]
+pub mod mock;
 pub mod templates;
 use crate::crawler::{Crawler, Wallet};
 use crate::templates::{body, form};
@@ -7,24 +9,14 @@ use axum::{
     routing::get,
     Router,
 };
-#[cfg(not(test))]
 use ethers::prelude::providers::Http;
-#[cfg(test)]
-use ethers::prelude::providers::MockProvider;
 use ethers::prelude::providers::{JsonRpcClient, Provider};
 use maud::{html, Markup};
-#[cfg(not(test))]
 use std::env::var;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower::limit::ConcurrencyLimitLayer;
 
-#[cfg(test)]
-fn get_provider() -> Provider<impl JsonRpcClient> {
-    Provider::new(MockProvider::new())
-}
-
-#[cfg(not(test))]
 fn get_provider() -> Provider<impl JsonRpcClient> {
     let http_provider = var("HTTP_PROVIDER").expect("HTTP_PROVIDER not set");
     Provider::<Http>::try_from(http_provider).expect("could not instantiate HTTP Provider")
@@ -38,7 +30,7 @@ async fn main() {
     let middleware = tower::ServiceBuilder::new().layer(ConcurrencyLimitLayer::new(1));
 
     let app = Router::new()
-        .route("/", get(root))
+        .route("/", get(handler))
         .layer(middleware)
         .with_state(provider);
 
@@ -50,7 +42,7 @@ async fn main() {
         .unwrap();
 }
 
-async fn root(
+async fn handler(
     State(provider): State<Arc<Provider<impl JsonRpcClient>>>,
     maybe_wallet: Option<Query<Wallet>>,
 ) -> Markup {
@@ -97,5 +89,35 @@ async fn root(
                 }
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::{get_mock, ADDRESS};
+    use anyhow::Result;
+    use ethers::prelude::types::Address;
+    use maud::PreEscaped;
+
+    #[tokio::test]
+    async fn test_handler() -> Result<()> {
+        let address = ADDRESS.parse::<Address>()?;
+
+        let provider = Arc::new(Provider::new(get_mock(address)?));
+        let wallet = Wallet {
+            address: ADDRESS.to_string(),
+            block: 1,
+        };
+        let PreEscaped(markup) = handler(State(provider), Some(Query(wallet))).await;
+
+        assert!(
+            markup.contains("<tr><td>0xaa7a…0a6f</td><td>-</td><td>0.000000000000000000</td></tr>")
+        );
+        assert!(markup.contains(
+            "<tr><td>0x0000…0000</td><td>0xaa7a…0a6f</td><td>0.000000000000000000</td></tr>"
+        ));
+        dbg!(markup);
+        Ok(())
     }
 }
