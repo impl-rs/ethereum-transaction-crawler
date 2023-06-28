@@ -6,11 +6,11 @@ To get transaction data from a given address directly from an Ethereum node, we 
 
 ## Getting Started
 
-You can run this application by cloning this repository and running the following command:
+You can run the application by cloning the repository and running the following command:
 
 `HTTP_PROVIDER="HTTP_PROVIDER_URL" cargo run`
 
-where `HTTP_PROVIDER_URL` is a URL to an Ethereum node, you can use Alchemy's free tier for this.
+The `HTTP_PROVIDER_URL` is an URL to an Ethereum node, you can use Alchemy's free tier for this.
 
 Alchemy has a generous free tier, but because this crawler runs concurrently through all blocks and transactions from the inputted block number to the current block number, it can take a while to run. If you want to run the crawler for a large number of blocks, you can use a paid tier from Alchemy or another Ethereum node provider.
 
