@@ -12,7 +12,7 @@ You can run this application by cloning this repository and running the followin
 
 where `HTTP_PROVIDER_URL` is a URL to an Ethereum node, you can use Alchemy's free tier for this.
 
-Alchemy has a generous free tier, but because this crawler runs through all blocks from the inputted block number to the current block number, it can take a while to run. If you want to run the crawler for a large number of blocks, you can use a paid tier from Alchemy or another Ethereum node provider.
+Alchemy has a generous free tier, but because this crawler runs concurrently through all blocks and transactions from the inputted block number to the current block number, it can take a while to run. If you want to run the crawler for a large number of blocks, you can use a paid tier from Alchemy or another Ethereum node provider.
 
 To handle when the crawler exceeds the rate limit of the Ethereum node, the crawler uses `RetryClient` from `ethers-rs`. This allows the crawler to retry requests when the rate limit is exceeded using an exponential backoff strategy.
 
