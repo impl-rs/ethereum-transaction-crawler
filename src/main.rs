@@ -26,7 +26,7 @@ fn get_provider() -> Provider<impl JsonRpcClient> {
 async fn main() {
     // initialize provider
     let provider = Arc::new(get_provider());
-    // Restrivct to one concurrent request at the time
+    // restrict to one concurrent request at the time
     let middleware = tower::ServiceBuilder::new().layer(ConcurrencyLimitLayer::new(1));
 
     let app = Router::new()
@@ -95,7 +95,7 @@ async fn handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::{get_mock, ADDRESS};
+    use crate::mock::{get_mock, setup_provider, ADDRESS};
     use anyhow::Result;
     use ethers::prelude::types::Address;
     use maud::PreEscaped;
@@ -104,12 +104,15 @@ mod tests {
     async fn test_handler() -> Result<()> {
         let address = ADDRESS.parse::<Address>()?;
 
-        let provider = Arc::new(Provider::new(get_mock(address)?));
         let wallet = Wallet {
             address: ADDRESS.to_string(),
             block: 1,
         };
-        let PreEscaped(markup) = handler(State(provider), Some(Query(wallet))).await;
+        let PreEscaped(markup) = handler(
+            State(setup_provider(get_mock(address)?)),
+            Some(Query(wallet)),
+        )
+        .await;
 
         assert!(
             markup.contains("<tr><td>0xaa7a…0a6f</td><td>-</td><td>0.000000000000000000</td></tr>")
@@ -117,7 +120,7 @@ mod tests {
         assert!(markup.contains(
             "<tr><td>0x0000…0000</td><td>0xaa7a…0a6f</td><td>0.000000000000000000</td></tr>"
         ));
-        dbg!(markup);
+
         Ok(())
     }
 }

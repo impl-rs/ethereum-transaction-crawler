@@ -1,11 +1,16 @@
 use anyhow::Result;
 use ethers::prelude::{
-    providers::MockProvider,
+    providers::{MockProvider, Provider},
     types::{Address, Block, Transaction, H256, U64},
 };
+use std::sync::Arc;
 
 pub const ADDRESS: &str = "0xaa7a9ca87d3694b5755f213b5d04094b8d0f0a6f";
 pub const ZERO_VALUE: &str = "0.000000000000000000";
+
+pub fn setup_provider(mock_provider: MockProvider) -> Arc<Provider<MockProvider>> {
+    Arc::new(Provider::new(mock_provider))
+}
 
 pub fn get_mock(address: Address) -> Result<MockProvider> {
     let mock_provider = MockProvider::new();

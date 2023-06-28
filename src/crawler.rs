@@ -115,15 +115,11 @@ impl<T: JsonRpcClient> Crawler<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::{get_mock, ADDRESS, ZERO_VALUE};
+    use crate::mock::{get_mock, setup_provider, ADDRESS, ZERO_VALUE};
     use ethers::prelude::{
         providers::MockProvider,
         types::{Block, Transaction, H256},
     };
-
-    fn setup(mock_provider: MockProvider) -> Arc<Provider<MockProvider>> {
-        Arc::new(Provider::new(mock_provider))
-    }
 
     #[tokio::test]
     async fn test_fetch_block() -> Result<()> {
@@ -134,7 +130,7 @@ mod tests {
         block.transactions = vec![H256::zero()];
         mock_provider.push(block)?;
 
-        let transactions = fetch_block(setup(mock_provider), 1).await;
+        let transactions = fetch_block(setup_provider(mock_provider), 1).await;
 
         assert_eq!(transactions.len(), 1);
         assert_eq!(transactions[0], H256::zero());
@@ -155,7 +151,7 @@ mod tests {
 
         mock_provider.push(transaction)?;
 
-        let transaction = fetch_transaction(setup(mock_provider), address, tx).await;
+        let transaction = fetch_transaction(setup_provider(mock_provider), address, tx).await;
 
         Ok(transaction)
     }
@@ -207,7 +203,7 @@ mod tests {
         let mock_provider = get_mock(address)?;
 
         let crawler = Crawler::new(
-            setup(mock_provider),
+            setup_provider(mock_provider),
             Query(Wallet {
                 address: ADDRESS.into(),
                 block: 1,
